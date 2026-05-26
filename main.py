@@ -2,7 +2,7 @@ import os
 import discord
 from discord import app_commands
 from discord.ext import commands
-import google.generativeai as genai  # 元のライブラリに戻す（Renderのバグ対策）
+from google import genai  # 最新のライブラリを使用
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
@@ -11,10 +11,8 @@ TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CATEGORY_ID = int(os.getenv("INTERVIEW_CATEGORY_ID", "0"))
 
-# Geminiの設定
-genai.configure(api_key=GEMINI_API_KEY)
-# ✨【超重要】モデル名を末尾に「-latest」がついた最新版に明示的に指定
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+# ✨ 通信先を「v1」に完全固定して初期化（これでv1beta問題は絶対に起きません）
+ai = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1'})
 
 # Botの初期化
 intents = discord.Intents.default()
@@ -123,9 +121,12 @@ async def on_message(message):
                     "一度にたくさん質問せず、対話を意識してください。最終的な合否は出さず、面接を続けてください。"
                 )
 
-                # ✨ 旧ライブラリが自動でv1betaを見にいっても、最新モデルを掴めるようにするプロンプト構成
-                prompt = f"【指示: {system_instruction}】\nユーザーの発言: {message.content}"
-                response = model.generate_content(prompt)
+                # ✨ 最新ライブラリの呼び出し方
+                response = ai.models.generate_content(
+                    model='gemini-1.5-flash',
+                    contents=message.content,
+                    config={'system_instruction': system_instruction}
+                )
                 
                 await message.channel.send(response.text)
             except Exception as e:
