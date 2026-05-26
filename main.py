@@ -2,7 +2,7 @@ import os
 import discord
 from discord import app_commands
 from discord.ext import commands
-import google.generativeai as genai
+from google import genai  # ✨ 最新のライブラリに変更
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
@@ -11,10 +11,8 @@ TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CATEGORY_ID = int(os.getenv("INTERVIEW_CATEGORY_ID", "0"))  # 面接チャンネルを作るカテゴリのID
 
-# Geminiの設定
-genai.configure(api_key=GEMINI_API_KEY)
-# モデルを最新の『gemini-1.5-flash』に変更（無料・高速）
-model = genai.GenerativeModel('gemini-1.5-flash')
+# ✨ 最新のGeminiクライアント初期化
+ai = genai.Client(api_key=GEMINI_API_KEY)
 
 # Botの初期化
 intents = discord.Intents.default()
@@ -99,7 +97,7 @@ async def on_ready():
     except Exception as e:
         print(e)
 
-# 面接用パネルを設置するコマンド（管理者制限を解除済）
+# 面接用パネルを設置するコマンド
 @bot.tree.command(name="setup_panel", description="面接申し込み用パネルを設置します")
 async def setup_panel(interaction: discord.Interaction):
     embed = discord.Embed(
@@ -123,13 +121,15 @@ async def on_message(message):
                     "一度にたくさん質問せず、対話を意識してください。最終的な合否は出さず、面接を続けてください。"
                 )
 
-                # 最新のモデルに合わせたシンプルな呼び出し方に修正
-                prompt = f"【指示: {system_instruction}】\nユーザーの発言: {message.content}"
-                response = model.generate_content(prompt)
+                # ✨ 新しいgoogle-genaiライブラリの呼び出し形式
+                response = ai.models.generate_content(
+                    model='gemini-1.5-flash',
+                    contents=message.content,
+                    config={'system_instruction': system_instruction}
+                )
                 
                 await message.channel.send(response.text)
             except Exception as e:
-                # 🛠️ チャット上に見えるように、具体的なエラー内容（e）を出力するように改良
                 await message.channel.send(f"⚠️ AIの応答中にエラーが発生しました。\nエラー内容: `{str(e)}`")
                 print(e)
 
