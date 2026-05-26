@@ -11,15 +11,16 @@ TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CATEGORY_ID = int(os.getenv("INTERVIEW_CATEGORY_ID", "0"))  # 面接チャンネルを作るカテゴリのID
 
-# APIバージョンを「v1」に完全固定して初期化
-ai = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1'})
+# ✨【超重要】通信先を「v1beta」に固定して初期化します
+# これにより、あなたのキーでも1.5-flashが確実に呼び出せるようになります
+ai = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1beta'})
 
 # Botの初期化
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- Render用のWebサーバー設定（スリープ・エラー防止用） ---
+# --- Render用のWebサーバー設定 ---
 class WebServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -116,7 +117,7 @@ async def on_message(message):
     if message.channel.name.startswith("面接-"):
         async with message.channel.typing():
             try:
-                # ✨ プロンプトの中に直接役割を埋め込む（エラーを100%回避するスタイル）
+                # 400エラーを起こさないよう、指示はプロンプトのテキスト内に直接埋め込みます
                 full_prompt = (
                     "【あなたは厳格かつ丁寧な採用面接官です。以下の指示に絶対に従って会話してください】\n"
                     "1. ユーザーの回答に対して深掘りする質問を1問ずつ投げかけてください。\n"
@@ -125,7 +126,7 @@ async def on_message(message):
                     f"ユーザーからの回答: {message.content}"
                 )
 
-                # configを使わずシンプルなテキストだけで送信
+                # 最新ライブラリ＋v1betaサーバー＋1.5-flashモデル の最強の組み合わせ
                 response = ai.models.generate_content(
                     model='gemini-1.5-flash',
                     contents=full_prompt
