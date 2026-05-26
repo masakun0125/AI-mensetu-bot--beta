@@ -3,7 +3,6 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from google import genai  # 最新のライブラリ
-from google.genai import types  # ✨ システムプロンプト設定用の型をインポート
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
@@ -39,7 +38,6 @@ def run_web_server():
 
 # --- 入力フォーム（モーダル）の定義 ---
 class InterviewForm(discord.ui.Modal, title="面接 申込フォーム"):
-    # 質問項目の定義
     time_slot = discord.ui.TextInput(label="オンラインになれる時間帯", placeholder="例：平日夜、土日など", max_length=100)
     rule_reply = discord.ui.TextInput(label="ルール違反を見かけた際の対応", style=discord.TextStyle.paragraph, placeholder="どのように声をかけるか記述してください", max_length=300)
     reason = discord.ui.TextInput(label="志望動機", style=discord.TextStyle.paragraph, placeholder="なぜ応募したか", max_length=500)
@@ -48,18 +46,14 @@ class InterviewForm(discord.ui.Modal, title="面接 申込フォーム"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
-        
-        # 面接用のカテゴリを取得
         category = guild.get_channel(CATEGORY_ID) if CATEGORY_ID else None
 
-        # 権限の設定（申し込んだ本人とBot、管理者だけが見えるようにする）
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
         }
 
-        # 専用チャンネルの作成
         channel_name = f"面接-{interaction.user.name}"
         interview_channel = await guild.create_text_channel(
             name=channel_name,
@@ -67,7 +61,6 @@ class InterviewForm(discord.ui.Modal, title="面接 申込フォーム"):
             overwrites=overwrites
         )
 
-        # フォームの回答をチャンネルに投稿
         embed = discord.Embed(title="📝 面接申込内容", color=discord.Color.blue())
         embed.add_field(name="申請者", value=interaction.user.mention, inline=False)
         embed.add_field(name="時間帯", value=self.time_slot.value, inline=False)
@@ -77,13 +70,11 @@ class InterviewForm(discord.ui.Modal, title="面接 申込フォーム"):
         
         await interview_channel.send(embed=embed)
         
-        # AI面接官の最初の挨拶
         welcome_msg = (
             f"それでは{interaction.user.mention}さん、面接を開始します。\n"
             "提出いただいた内容を確認しました。まずは、今回の志望動機について詳しくお伺いできますか？"
         )
         await interview_channel.send(welcome_msg)
-
         await interaction.followup.send(f"面接チャンネルを作成しました！ {interview_channel.mention} へ移動してください。", ephemeral=True)
 
 # --- 「申し込む」ボタンの定義 ---
@@ -93,21 +84,20 @@ class StartButton(discord.ui.View):
 
     @discord.ui.button(label="面接を申し込む", style=discord.ButtonStyle.green, custom_id="start_interview")
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # ボタンが押されたらフォームを表示
         await interaction.response.send_modal(InterviewForm())
 
 # --- Botのイベント処理 ---
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user.name}")
-    bot.add_view(StartButton()) # ボタンを常時監視
+    bot.add_view(StartButton())
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} command(s)")
     except Exception as e:
         print(e)
 
-# 面接用パネルを設置するコマンド（/setup_panel）
+# 面接用パネルを設置するコマンド
 @bot.tree.command(name="setup_panel", description="面接申し込み用パネルを設置します")
 async def setup_panel(interaction: discord.Interaction):
     embed = discord.Embed(
@@ -123,23 +113,22 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # チャンネル名が「面接-」で始まるチャンネルのみ反応
     if message.channel.name.startswith("面接-"):
         async with message.channel.typing():
             try:
-                # AIへの役割指示（システムプロンプト）
-                system_instruction = (
-                    "あなたは厳格かつ丁寧な採用面接官です。ユーザーの回答に対して深掘りする質問を1問ずつ投げかけてください。"
-                    "一度にたくさん質問せず、対話を意識してください。最終的な合否は出さず、面接を続けてください。"
+                # ✨ プロンプトの中に直接役割を埋め込む（エラーを100%回避するスタイル）
+                full_prompt = (
+                    "【あなたは厳格かつ丁寧な採用面接官です。以下の指示に絶対に従って会話してください】\n"
+                    "1. ユーザーの回答に対して深掘りする質問を1問ずつ投げかけてください。\n"
+                    "2. 一度にたくさん質問せず、対話を意識してください。\n"
+                    "3. 最終的な合否は出さず、面接の対話を続けてください。\n\n"
+                    f"ユーザーからの回答: {message.content}"
                 )
 
-                # ✨ 最新ライブラリ（google-genai）の正しい設定方法で呼び出し
+                # configを使わずシンプルなテキストだけで送信
                 response = ai.models.generate_content(
                     model='gemini-1.5-flash',
-                    contents=message.content,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction
-                    )
+                    contents=full_prompt
                 )
                 
                 await message.channel.send(response.text)
