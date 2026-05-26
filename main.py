@@ -20,13 +20,19 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- Render用のWebサーバー設定（スリープ防止用） ---
+# --- Render用のWebサーバー設定（修正版・スリープ＆エラー防止用） ---
 class WebServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/html")
         self.end_headers()
         self.wfile.write(b"Bot is running!")
+
+    def do_HEAD(self):
+        # Renderからの定期的な死活監視（HEADリクエスト）にエラーを出さず応答する
+        self.send_response(200)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
 
 def run_web_server():
     server = HTTPServer(("0.0.0.0", 8080), WebServer)
@@ -47,7 +53,7 @@ class InterviewForm(discord.ui.Modal, title="面接 申込フォーム"):
         # 面接用のカテゴリを取得
         category = guild.get_channel(CATEGORY_ID) if CATEGORY_ID else None
 
-        # 権限の設定（申し込んだ本事象とBot、管理者だけが見えるようにする）
+        # 権限の設定（申し込んだ本人とBot、管理者だけが見えるようにする）
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
