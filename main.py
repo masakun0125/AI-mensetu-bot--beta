@@ -2,25 +2,20 @@ import os
 import discord
 from discord import app_commands
 from discord.ext import commands
-from google import genai  # 最新のライブラリ
+from google import genai
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
-# --- 環境変数の読み込み ---
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-CATEGORY_ID = int(os.getenv("INTERVIEW_CATEGORY_ID", "0"))  # 面接チャンネルを作るカテゴリのID
+CATEGORY_ID = int(os.getenv("INTERVIEW_CATEGORY_ID", "0"))
 
-# ✨【超重要】通信先を「v1beta」に固定して初期化します
-# これにより、あなたのキーでも1.5-flashが確実に呼び出せるようになります
 ai = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1beta'})
 
-# Botの初期化
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- Render用のWebサーバー設定 ---
 class WebServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -37,7 +32,6 @@ def run_web_server():
     server = HTTPServer(("0.0.0.0", 8080), WebServer)
     server.serve_forever()
 
-# --- 入力フォーム（モーダル）の定義 ---
 class InterviewForm(discord.ui.Modal, title="面接 申込フォーム"):
     time_slot = discord.ui.TextInput(label="オンラインになれる時間帯", placeholder="例：平日夜、土日など", max_length=100)
     rule_reply = discord.ui.TextInput(label="ルール違反を見かけた際の対応", style=discord.TextStyle.paragraph, placeholder="どのように声をかけるか記述してください", max_length=300)
@@ -78,7 +72,6 @@ class InterviewForm(discord.ui.Modal, title="面接 申込フォーム"):
         await interview_channel.send(welcome_msg)
         await interaction.followup.send(f"面接チャンネルを作成しました！ {interview_channel.mention} へ移動してください。", ephemeral=True)
 
-# --- 「申し込む」ボタンの定義 ---
 class StartButton(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -87,7 +80,6 @@ class StartButton(discord.ui.View):
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(InterviewForm())
 
-# --- Botのイベント処理 ---
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user.name}")
@@ -98,7 +90,6 @@ async def on_ready():
     except Exception as e:
         print(e)
 
-# 面接用パネルを設置するコマンド
 @bot.tree.command(name="setup_panel", description="面接申し込み用パネルを設置します")
 async def setup_panel(interaction: discord.Interaction):
     embed = discord.Embed(
@@ -108,7 +99,6 @@ async def setup_panel(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed, view=StartButton())
 
-# 面接チャンネル内でのAIとの会話処理
 @bot.event
 async def on_message(message):
     if message.author.bot:
@@ -117,7 +107,6 @@ async def on_message(message):
     if message.channel.name.startswith("面接-"):
         async with message.channel.typing():
             try:
-                # 400エラーを起こさないよう、指示はプロンプトのテキスト内に直接埋め込みます
                 full_prompt = (
                     "【あなたは厳格かつ丁寧な採用面接官です。以下の指示に絶対に従って会話してください】\n"
                     "1. ユーザーの回答に対して深掘りする質問を1問ずつ投げかけてください。\n"
@@ -126,7 +115,6 @@ async def on_message(message):
                     f"ユーザーからの回答: {message.content}"
                 )
 
-                # 最新ライブラリ＋v1betaサーバー＋1.5-flashモデル の最強の組み合わせ
                 response = ai.models.generate_content(
                     model='gemini-1.5-flash',
                     contents=full_prompt
@@ -139,6 +127,5 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# サーバー起動とBot起動
 threading.Thread(target=run_web_server, daemon=True).start()
 bot.run(TOKEN)
