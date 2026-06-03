@@ -1,1 +1,3 @@
-# AI-mensetu-bot--beta
+## AIを使用した面接
+
+### TIYでのmoderator募集面接を目的に作成したbot。人工知能をテストする目的もある。
