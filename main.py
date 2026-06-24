@@ -130,7 +130,7 @@ async def start_interview_process(interaction: discord.Interaction):
     embed = discord.Embed(title="モデレーター募集面接へようこそ", color=discord.Color.blue())
     embed.add_field(
         name="面接内容",
-        value="以下の4つの質問にお答えいただきます：\n1️. 業務可能な時間帯\n2️. 志望動機\n3️. 自己PR\n4️. 荒らし対応方法",
+        value="以下の4つの質問にお答えいただきます：\n1. 業務可能な時間帯\n2. 志望動機\n3. 自己PR\n4. 荒らし対応方法",
         inline=False
     )
     await interview_channel.send(embed=embed)
@@ -251,7 +251,6 @@ async def generate_ai_response(session: InterviewSession, user_message: str) -> 
             next_q = get_phase_next_question(session.current_phase)
             return f"ありがとうございました。\n\n{next_q}"
         else:
-            # 修正箇所: 面接完了時メッセージの更新
             return "すべてのご質問にお答えいただき、ありがとうございました。\n結果はこのbotよりDMにてお知らせします。しばらくお待ちください。また、面接の合否についてのお問い合わせは一切承っておりません。"
 
 async def generate_evaluation(session: InterviewSession) -> dict:
@@ -261,7 +260,6 @@ async def generate_evaluation(session: InterviewSession) -> dict:
         for msg in session.conversation_history
     ])
     
-    # 修正箇所: 厳格な評価プロンプトへの差し替え
     evaluation_prompt = f"""
 【厳格な採用面接官による総合評価】
 
@@ -323,31 +321,33 @@ async def generate_evaluation(session: InterviewSession) -> dict:
             "raw_response": str(e)
         }
 
-# 追加箇所: 合否通知ボタンビュー
+# 合否通知ボタンビュー
 class ResultView(discord.ui.View):
     def __init__(self, session: InterviewSession, guild: discord.Guild):
         super().__init__(timeout=None)
         self.session = session
         self.guild = guild
 
+    # 修正箇所: send_dmメソッドの刷新
     async def send_dm(self, interaction: discord.Interaction, result: str, color: discord.Color, message: str):
-        user = self.guild.get_member(self.session.user_id)
-        if user:
-            try:
-                embed = discord.Embed(
-                    title="面接結果のお知らせ",
-                    description=message,
-                    color=color
-                )
-                embed.set_footer(text=f"{self.guild.name} モデレーター採用面接")
-                await user.send(embed=embed)
-                await interaction.response.send_message(f"✅ {user.name} にDMで{result}を通知しました。", ephemeral=True)
-            except discord.Forbidden:
-                await interaction.response.send_message("⚠️ ユーザーのDMが無効のため通知できませんでした。", ephemeral=True)
-        else:
-            await interaction.response.send_message("⚠️ ユーザーが見つかりませんでした。", ephemeral=True)
+        try:
+            user = await interaction.guild.fetch_member(self.session.user_id)  # ← get_member → fetch_member に変更
+        except discord.NotFound:
+            await interaction.response.send_message("⚠️ ユーザーがサーバーから退出しているため通知できませんでした。", ephemeral=True)
+            return
         
-        # ボタンを無効化
+        try:
+            embed = discord.Embed(
+                title="📋 面接結果のお知らせ",
+                description=message,
+                color=color
+            )
+            embed.set_footer(text=f"{self.guild.name} モデレーター採用面接")
+            await user.send(embed=embed)
+            await interaction.response.send_message(f"✅ {user.name} にDMで{result}を通知しました。", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("⚠️ ユーザーのDMが無効のため通知できませんでした。", ephemeral=True)
+        
         for child in self.children:
             child.disabled = True
         await interaction.message.edit(view=self)
@@ -376,7 +376,7 @@ class ResultView(discord.ui.View):
             "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n現在審査中のため、結果は**保留**となっております。\n追って担当者よりご連絡いたします。"
         )
 
-# 修正箇所: /end_interview コマンド（管理者限定化 ＆ 権限剥奪 ＆ ボタン付き送信）
+# /end_interview コマンド（管理者限定化 ＆ 権限剥奪 ＆ ボタン付き送信）
 @bot.tree.command(name="end_interview", description="面接を終了し、評価結果を表示します（管理者専用）")
 @app_commands.checks.has_permissions(administrator=True)
 async def end_interview(interaction: discord.Interaction):
@@ -436,7 +436,7 @@ async def end_interview(interaction: discord.Interaction):
         await interaction.followup.send(f"⚠️Error: {str(e)}", ephemeral=True)
         print(e)
 
-# 追加箇所: エラーハンドリング
+# エラーハンドリング
 @end_interview.error
 async def end_interview_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, app_commands.MissingPermissions):
