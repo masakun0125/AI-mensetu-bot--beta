@@ -103,11 +103,11 @@ class StartButton(discord.ui.View):
 
     @discord.ui.button(label="面接を申し込む", style=discord.ButtonStyle.green, custom_id="start_interview")
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)  # ← ここで1回だけ defer
         await start_interview_process(interaction)
 
 async def start_interview_process(interaction: discord.Interaction):
     """面接開始プロセス"""
-    await interaction.response.defer(ephemeral=True)
     guild = interaction.guild
     category = guild.get_channel(CATEGORY_ID) if CATEGORY_ID else None
 
@@ -124,20 +124,24 @@ async def start_interview_process(interaction: discord.Interaction):
         overwrites=overwrites
     )
 
-    # セッション作成
     session = InterviewSession(interaction.user.id, interaction.user.name)
     interview_sessions[interview_channel.id] = session
 
     embed = discord.Embed(title="🤝 モデレーター募集面接へようこそ", color=discord.Color.blue())
-    embed.add_field(name="面接内容", value="以下の4つの質問にお答えいただきます：\n1️⃣ 業務可能な時間帯\n2️⃣ 志望動機\n3️⃣ 自己PR\n4️⃣ 荒らし対応方法", inline=False)
-    
+    embed.add_field(
+        name="面接内容",
+        value="以下の4つの質問にお答えいただきます：\n1️⃣ 業務可能な時間帯\n2️⃣ 志望動機\n3️⃣ 自己PR\n4️⃣ 荒らし対応方法",
+        inline=False
+    )
     await interview_channel.send(embed=embed)
-    
-    # 最初の質問を送信
+
     initial_question = "まずは、**あなたが業務可能な時間帯**を教えていただけますか？\n例）平日は夜間のみ、土日は終日可能、など"
     await interview_channel.send(initial_question)
-    
-    await interaction.followup.send(f"面接チャンネルを作成しました！ {interview_channel.mention} へ移動してください。", ephemeral=True)
+
+    await interaction.followup.send(
+        f"面接チャンネルを作成しました！ {interview_channel.mention} へ移動してください。",
+        ephemeral=True
+    )
 
 @bot.event
 async def on_ready():
@@ -296,7 +300,7 @@ async def generate_evaluation(session: InterviewSession) -> dict:
 必ずJSON形式のみで返してください。余分なテキストは含めないでください。"""
     
     try:
-        response = client.chat.completions.create(
+        response = client.chat.com completions.create(
             model="llama-3.1-70b-versatile",
             messages=[
                 {"role": "user", "content": evaluation_prompt}
@@ -358,6 +362,7 @@ async def end_interview(interaction: discord.Interaction):
                 color=discord.Color.red()
             )
         else:
+            # 修正箇所: }.get() に修正
             recommendation_color = {
                 "合格": discord.Color.green(),
                 "要検討": discord.Color.yellow(),
