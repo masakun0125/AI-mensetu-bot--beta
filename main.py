@@ -300,7 +300,7 @@ async def generate_evaluation(session: InterviewSession) -> dict:
 必ずJSON形式のみで返してください。余分なテキストは含めないでください。"""
     
     try:
-        response = client.chat.com completions.create(
+        response = client.chat.completions.create(
             model="llama-3.1-70b-versatile",
             messages=[
                 {"role": "user", "content": evaluation_prompt}
