@@ -2,17 +2,18 @@ import os
 import discord
 from discord import app_commands
 from discord.ext import commands
-from google import genai
+import anthropic
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import json
 from datetime import datetime
+from enum import Enum
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 CATEGORY_ID = int(os.getenv("INTERVIEW_CATEGORY_ID", "0"))
 
-ai = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1beta'})
+client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -20,6 +21,13 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # 面接セッション管理
 interview_sessions = {}
+
+class InterviewPhase(Enum):
+    AVAILABILITY = "availability"  # 業務可能な時間帯
+    MOTIVATION = "motivation"  # 志望動機
+    SELF_PR = "self_pr"  # 自己PR
+    TROLL_RESPONSE = "troll_response"  # 荒らし対応
+    COMPLETED = "completed"  # 完了
 
 class WebServer(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -39,76 +47,55 @@ def run_web_server():
 
 class InterviewSession:
     """面接セッション情報を管理"""
-    def __init__(self, user_id, user_name, form_data):
+    def __init__(self, user_id, user_name):
         self.user_id = user_id
         self.user_name = user_name
-        self.form_data = form_data
-        self.conversation = []
-        self.question_count = 0
         self.start_time = datetime.now()
-    
-    def add_exchange(self, user_msg, ai_response):
+        
+        # 各フェーズのデータ
+        self.phase_data = {
+            InterviewPhase.AVAILABILITY: {"answer": "", "follow_up_count": 0},
+            InterviewPhase.MOTIVATION: {"answer": "", "follow_up_count": 0},
+            InterviewPhase.SELF_PR: {"answer": "", "follow_up_count": 0},
+            InterviewPhase.TROLL_RESPONSE: {"answer": "", "follow_up_count": 0},
+        }
+        
+        # 会話履歴
+        self.conversation_history = []
+        
+        # 現在のフェーズ
+        self.current_phase = InterviewPhase.AVAILABILITY
+
+    def add_message(self, user_msg, ai_response):
         """会話を記録"""
-        self.conversation.append({
+        self.conversation_history.append({
             "user": user_msg,
             "ai": ai_response,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "phase": self.current_phase.value
         })
-        self.question_count += 1
+
+    def record_phase_answer(self, answer):
+        """現在のフェーズの回答を記録"""
+        self.phase_data[self.current_phase]["answer"] = answer
+
+    def increment_follow_up(self):
+        """フォローアップ質問数を増加"""
+        self.phase_data[self.current_phase]["follow_up_count"] += 1
+
+    def next_phase(self):
+        """次のフェーズに移動"""
+        phases = list(InterviewPhase)[:-1]  # COMPLETED以外
+        current_idx = phases.index(self.current_phase)
+        if current_idx < len(phases) - 1:
+            self.current_phase = phases[current_idx + 1]
+            return True
+        else:
+            self.current_phase = InterviewPhase.COMPLETED
+            return False
 
 class InterviewForm(discord.ui.Modal, title="面接 申込フォーム"):
-    time_slot = discord.ui.TextInput(label="オンラインになれる時間帯", placeholder="例：平日夜、土日など", max_length=100)
-    rule_reply = discord.ui.TextInput(label="ルール違反を見かけた際の対応", style=discord.TextStyle.paragraph, placeholder="どのように声をかけるか記述してください", max_length=500)
-    reason = discord.ui.TextInput(label="志望動機", style=discord.TextStyle.paragraph, placeholder="なぜ応募したか", max_length=500)
-    pr = discord.ui.TextInput(label="自己PR", style=discord.TextStyle.paragraph, placeholder="あなたの強みなど", max_length=500)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
-        category = guild.get_channel(CATEGORY_ID) if CATEGORY_ID else None
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        }
-
-        channel_name = f"面接-{interaction.user.name}"
-        interview_channel = await guild.create_text_channel(
-            name=channel_name,
-            category=category,
-            overwrites=overwrites
-        )
-
-        # セッション作成
-        form_data = {
-            "time_slot": self.time_slot.value,
-            "rule_reply": self.rule_reply.value,
-            "reason": self.reason.value,
-            "pr": self.pr.value
-        }
-        interview_sessions[interview_channel.id] = InterviewSession(
-            interaction.user.id,
-            interaction.user.name,
-            form_data
-        )
-
-        embed = discord.Embed(title="📝 面接申込内容", color=discord.Color.blue())
-        embed.add_field(name="申請者", value=interaction.user.mention, inline=False)
-        embed.add_field(name="時間帯", value=self.time_slot.value, inline=False)
-        embed.add_field(name="ルール違反への対応", value=self.rule_reply.value, inline=False)
-        embed.add_field(name="志望動機", value=self.reason.value, inline=False)
-        embed.add_field(name="自己PR", value=self.pr.value, inline=False)
-        
-        await interview_channel.send(embed=embed)
-        
-        welcome_msg = (
-            f"それでは{interaction.user.mention}さん、面接を開始します。\n"
-            "提出いただいた内容を確認しました。まずは、今回の志望動機について詳しくお伺いできますか？"
-        )
-        await interview_channel.send(welcome_msg)
-        await interview_channel.send("（面接終了後、`/end_interview` コマンドで評価結果を取得できます）")
-        await interaction.followup.send(f"面接チャンネルを作成しました！ {interview_channel.mention} へ移動してください。", ephemeral=True)
+    pass
 
 class StartButton(discord.ui.View):
     def __init__(self):
@@ -116,7 +103,41 @@ class StartButton(discord.ui.View):
 
     @discord.ui.button(label="面接を申し込む", style=discord.ButtonStyle.green, custom_id="start_interview")
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(InterviewForm())
+        await start_interview_process(interaction)
+
+async def start_interview_process(interaction: discord.Interaction):
+    """面接開始プロセス"""
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+    category = guild.get_channel(CATEGORY_ID) if CATEGORY_ID else None
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+    }
+
+    channel_name = f"面接-{interaction.user.name}"
+    interview_channel = await guild.create_text_channel(
+        name=channel_name,
+        category=category,
+        overwrites=overwrites
+    )
+
+    # セッション作成
+    session = InterviewSession(interaction.user.id, interaction.user.name)
+    interview_sessions[interview_channel.id] = session
+
+    embed = discord.Embed(title="🤝 モデレーター募集面接へようこそ", color=discord.Color.blue())
+    embed.add_field(name="面接内容", value="以下の4つの質問にお答えいただきます：\n1️⃣ 業務可能な時間帯\n2️⃣ 志望動機\n3️⃣ 自己PR\n4️⃣ 荒らし対応方法", inline=False)
+    
+    await interview_channel.send(embed=embed)
+    
+    # 最初の質問を送信
+    initial_question = "まずは、**あなたが業務可能な時間帯**を教えていただけますか？\n例）平日は夜間のみ、土日は終日可能、など"
+    await interview_channel.send(initial_question)
+    
+    await interaction.followup.send(f"面接チャンネルを作成しました！ {interview_channel.mention} へ移動してください。", ephemeral=True)
 
 @bot.event
 async def on_ready():
@@ -132,89 +153,179 @@ async def on_ready():
 async def setup_panel(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🤝 面接申込窓口",
-        description="下のボタンを押して、必要事項を入力すると専用の面接チャンネルが作成されます。",
+        description="下のボタンを押して、モデレーター募集面接に申し込んでください。",
         color=discord.Color.green()
     )
     await interaction.response.send_message(embed=embed, view=StartButton())
 
-async def generate_interview_question(user_response, context):
-    """AIが面接の質問を生成"""
-    full_prompt = (
-        "【あなたは厳格かつ丁寧な採用面接官です。以下の指示に絶対に従って会話してください】\n"
-        "1. ユーザーの回答に対して深掘りする質問を1問ずつ投げかけてください。\n"
-        "2. 一度にたくさん質問せず、対話を意識してください。\n"
-        "3. 最終的な合否は出さず、面接の対話を続けてください。\n"
-        f"ユーザーからの回答: {user_response}"
-    )
+def get_follow_up_prompt(phase: InterviewPhase, user_answer: str) -> str:
+    """フェーズに応じたフォローアップ質問を生成"""
     
-    response = ai.models.generate_content(
-        model='gemini-1.5-flash',
-        contents=full_prompt
-    )
-    
-    return response.text
+    if phase == InterviewPhase.AVAILABILITY:
+        return f"""ユーザーの回答: "{user_answer}"
 
-async def generate_evaluation(session):
-    """面接全体を評価して合否を判定"""
+ユーザーの業務可能な時間帯について、以下のいずれかのフォローアップ質問を1つだけ選んで、簡潔に質問してください：
+- 曜日や時間帯がより具体的でしたら、詳しく教えていただけますか?
+- 期間はどのくらい継続できる予定ですか?
+- または、回答が十分に詳しい場合は、その旨を伝えて次に進む準備ができたと述べてください。
+
+簡潔に、1-2文で返してください。"""
+    
+    elif phase == InterviewPhase.MOTIVATION:
+        return f"""ユーザーの回答: "{user_answer}"
+
+ユーザーの志望動機について、以下のいずれかのフォローアップ質問を1つだけ選んで、簡潔に質問してください：
+- なぜモデレーターという役割に興味を持ったのですか?
+- 過去に何か類似した経験やコミュニティ活動はありますか?
+- または、回答が十分に詳しい場合は、その旨を伝えて次に進む準備ができたと述べてください。
+
+簡潔に、1-2文で返してください。"""
+    
+    elif phase == InterviewPhase.SELF_PR:
+        return f"""ユーザーの回答: "{user_answer}"
+
+ユーザーの自己PRについて、具体的な例を引き出すフォローアップ質問を1つだけ選んで、簡潔に質問してください：
+- その強みは、具体的にどのような場面で活かせますか?（例：スポーツ、学業、アルバイト等で何を頑張ったのか）
+- その経験から得た学びは何ですか?
+- または、回答が十分に詳しい場合は、その旨を伝えて次に進む準備ができたと述べてください。
+
+簡潔に、1-2文で返してください。"""
+    
+    elif phase == InterviewPhase.TROLL_RESPONSE:
+        return f"""ユーザーの回答: "{user_answer}"
+
+ユーザーの荒らし対応方法について、以下のいずれかのフォローアップ質問を1つだけ選んで、簡潔に質問してください：
+- その対応方法を取る理由は何ですか?
+- 実際にそのような場面に遭遇したことはありますか?
+- または、回答が十分に詳しい場合は、その旨を伝えて次に進む準備ができたと述べてください。
+
+簡潔に、1-2文で返してください。"""
+    
+    return ""
+
+def get_phase_next_question(phase: InterviewPhase) -> str:
+    """次のフェーズの質問を取得"""
+    
+    if phase == InterviewPhase.MOTIVATION:
+        return "ありがとうございます。次に、**モデレーターへの志望動機**を教えていただけますか？\nなぜこの職に応募しようと思ったのか、ご説明ください。"
+    
+    elif phase == InterviewPhase.SELF_PR:
+        return "ありがとうございます。次に、**あなたの自己PR**をお願いします。\nあなたの強み、得意なこと、経験などをお聞かせください。"
+    
+    elif phase == InterviewPhase.TROLL_RESPONSE:
+        return "ありがとうございます。最後に、**コミュニティで荒らしやルール違反を見かけた時の対応方法**を教えていただけますか？\nどのように対応すべきだと考えますか？"
+    
+    elif phase == InterviewPhase.COMPLETED:
+        return None
+    
+    return ""
+
+async def generate_ai_response(session: InterviewSession, user_message: str) -> str:
+    """Claude APIを使ってAI応答を生成"""
+    
+    phase = session.current_phase
+    phase_info = session.phase_data[phase]
+    
+    # 回答を記録
+    session.record_phase_answer(user_message)
+    
+    # フォローアップ質問が残っている場合
+    if phase_info["follow_up_count"] < 1:
+        prompt = get_follow_up_prompt(phase, user_message)
+        phase_info["follow_up_count"] += 1
+        
+        response = client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=150,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        ai_response = response.content[0].text
+        
+        # "次に進む準備ができた" のようなキーワードで次フェーズに自動移行
+        if any(kw in ai_response for kw in ["次に進む", "次へ", "ありがとうございました", "了承しました"]):
+            session.next_phase()
+            if session.current_phase != InterviewPhase.COMPLETED:
+                next_q = get_phase_next_question(session.current_phase)
+                return f"{ai_response}\n\n{next_q}"
+        
+        return ai_response
+    
+    else:
+        # フォローアップ終了→次フェーズへ
+        session.next_phase()
+        if session.current_phase != InterviewPhase.COMPLETED:
+            next_q = get_phase_next_question(session.current_phase)
+            return f"ありがとうございました。\n\n{next_q}"
+        else:
+            return "すべてのご質問に回答いただき、ありがとうございました。\n`/end_interview` コマンドで面接を終了し、評価結果をご確認ください。"
+
+async def generate_evaluation(session: InterviewSession) -> dict:
+    """面接全体を評価"""
+    
     conversation_text = "\n".join([
-        f"面接官: {ex['ai']}\nユーザー: {ex['user']}"
-        for ex in session.conversation
+        f"【{msg['phase']}】\n面接官: （質問）\nユーザー: {msg['user']}"
+        for msg in session.conversation_history
     ])
     
     evaluation_prompt = f"""
 【採用面接官の総合評価】
 
-以下の面接記録をもとに、モデレーター職の候補者を評価してください。
+以下の面接記録をもとに、モデレーター職の候補者を総合評価してください。
 
-【申込情報】
-- 時間帯: {session.form_data['time_slot']}
-- ルール違反対応: {session.form_data['rule_reply']}
-- 志望動機: {session.form_data['reason']}
-- 自己PR: {session.form_data['pr']}
+【面接者】
+{session.user_name}
 
-【面接の会話】
+【面接の回答】
 {conversation_text}
 
-【評価項目（JSON形式で返してください）】
+【評価項目（JSON形式で必ず返してください）】
 {{
-  "technical_skills": {{"score": 0-10, "comment": "技術的スキルの評価"}},
-  "communication": {{"score": 0-10, "comment": "コミュニケーション能力"}},
+  "availability": {{"score": 0-10, "comment": "業務対応可能性"}},
   "motivation": {{"score": 0-10, "comment": "志望度・モチベーション"}},
-  "rule_awareness": {{"score": 0-10, "comment": "ルール遵守・規律意識"}},
-  "problem_solving": {{"score": 0-10, "comment": "問題解決能力"}},
-  "overall_score": 0-50,
+  "personality": {{"score": 0-10, "comment": "人格・適性"}},
+  "judgment": {{"score": 0-10, "comment": "判断力・対応力"}},
+  "overall_score": 0-40,
   "recommendation": "合格 / 要検討 / 不合格",
-  "summary": "総合コメント（100字程度）"
+  "summary": "総合コメント（150字以内）"
 }}
 
-必ずJSON形式で返してください。"""
-    
-    response = ai.models.generate_content(
-        model='gemini-1.5-flash',
-        contents=evaluation_prompt
-    )
+必ずJSON形式のみで返してください。余分なテキストは含めないでください。"""
     
     try:
-        # JSON部分を抽出
-        json_str = response.text
-        if "```json" in json_str:
-            json_str = json_str.split("```json")[1].split("```")[0]
-        elif "{" in json_str:
-            start = json_str.find("{")
-            end = json_str.rfind("}") + 1
-            json_str = json_str[start:end]
+        response = client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=500,
+            messages=[
+                {"role": "user", "content": evaluation_prompt}
+            ]
+        )
+        
+        response_text = response.content[0].text
+        
+        # JSON抽出
+        if "```json" in response_text:
+            json_str = response_text.split("```json")[1].split("```")[0]
+        elif "{" in response_text:
+            start = response_text.find("{")
+            end = response_text.rfind("}") + 1
+            json_str = response_text[start:end]
+        else:
+            json_str = response_text
         
         evaluation = json.loads(json_str)
-    except (json.JSONDecodeError, IndexError) as e:
-        print(f"Evaluation JSON parse error: {e}")
-        evaluation = {
+        return evaluation
+    
+    except Exception as e:
+        print(f"Evaluation error: {e}")
+        return {
             "overall_score": 0,
             "recommendation": "要検討",
             "summary": "評価生成エラー",
-            "raw_response": response.text
+            "raw_response": str(e)
         }
-    
-    return evaluation
 
 @bot.tree.command(name="end_interview", description="面接を終了し、評価結果を表示します")
 async def end_interview(interaction: discord.Interaction):
@@ -229,27 +340,22 @@ async def end_interview(interaction: discord.Interaction):
     
     session = interview_sessions[channel_id]
     
-    if len(session.conversation) == 0:
-        await interaction.followup.send("まだ会話がありません。面接をお続けください。")
+    if len(session.conversation_history) == 0:
+        await interaction.followup.send("まだ回答がありません。面接をお続けください。")
         return
     
-    # 評価生成中...
-    thinking_msg = await interaction.followup.send("⏳ 評価を生成中です...（30秒程度かかります）")
+    thinking_msg = await interaction.followup.send("⏳ 評価を生成中です...（20秒程度かかります）")
     
     try:
         evaluation = await generate_evaluation(session)
         
-        # 評価結果の表示
         if "raw_response" in evaluation:
-            # エラー時
             embed = discord.Embed(
                 title="⚠️ 評価生成エラー",
                 description=evaluation["summary"],
                 color=discord.Color.red()
             )
-            embed.add_field(name="詳細", value=evaluation.get("raw_response", "不明なエラー")[:1024], inline=False)
         else:
-            # 成功時
             recommendation_color = {
                 "合格": discord.Color.green(),
                 "要検討": discord.Color.yellow(),
@@ -262,19 +368,12 @@ async def end_interview(interaction: discord.Interaction):
                 color=recommendation_color
             )
             
-            embed.add_field(name="総合スコア", value=f"{evaluation.get('overall_score', 0)}/50", inline=False)
+            embed.add_field(name="総合スコア", value=f"{evaluation.get('overall_score', 0)}/40", inline=False)
             
-            # 各項目の詳細スコア
-            if "technical_skills" in evaluation:
+            if "availability" in evaluation:
                 embed.add_field(
-                    name="技術スキル",
-                    value=f"**{evaluation['technical_skills'].get('score', 0)}/10** - {evaluation['technical_skills'].get('comment', '')}",
-                    inline=False
-                )
-            if "communication" in evaluation:
-                embed.add_field(
-                    name="コミュニケーション能力",
-                    value=f"**{evaluation['communication'].get('score', 0)}/10** - {evaluation['communication'].get('comment', '')}",
+                    name="業務対応可能性",
+                    value=f"**{evaluation['availability'].get('score', 0)}/10** - {evaluation['availability'].get('comment', '')}",
                     inline=False
                 )
             if "motivation" in evaluation:
@@ -283,27 +382,25 @@ async def end_interview(interaction: discord.Interaction):
                     value=f"**{evaluation['motivation'].get('score', 0)}/10** - {evaluation['motivation'].get('comment', '')}",
                     inline=False
                 )
-            if "rule_awareness" in evaluation:
+            if "personality" in evaluation:
                 embed.add_field(
-                    name="ルール遵守意識",
-                    value=f"**{evaluation['rule_awareness'].get('score', 0)}/10** - {evaluation['rule_awareness'].get('comment', '')}",
+                    name="人格・適性",
+                    value=f"**{evaluation['personality'].get('score', 0)}/10** - {evaluation['personality'].get('comment', '')}",
                     inline=False
                 )
-            if "problem_solving" in evaluation:
+            if "judgment" in evaluation:
                 embed.add_field(
-                    name="問題解決能力",
-                    value=f"**{evaluation['problem_solving'].get('score', 0)}/10** - {evaluation['problem_solving'].get('comment', '')}",
+                    name="判断力・対応力",
+                    value=f"**{evaluation['judgment'].get('score', 0)}/10** - {evaluation['judgment'].get('comment', '')}",
                     inline=False
                 )
             
             embed.add_field(name="総評", value=evaluation.get("summary", ""), inline=False)
-            
-            # メタ情報
-            embed.set_footer(text=f"質問数: {session.question_count} | 面接者: {session.user_name}")
+            embed.set_footer(text=f"面接者: {session.user_name}")
         
         await thinking_msg.delete()
         await interaction.followup.send(embed=embed)
-        
+    
     except Exception as e:
         await thinking_msg.delete()
         await interaction.followup.send(f"⚠️ 評価生成中にエラーが発生しました: {str(e)}")
@@ -317,23 +414,26 @@ async def on_message(message):
     if message.channel.name.startswith("面接-"):
         async with message.channel.typing():
             try:
-                # セッション確認
                 if message.channel.id not in interview_sessions:
-                    session = InterviewSession(message.author.id, message.author.name, {})
-                    interview_sessions[message.channel.id] = session
+                    return
                 
                 session = interview_sessions[message.channel.id]
                 
-                # 質問を生成
-                response_text = await generate_interview_question(message.content, session)
+                if session.current_phase == InterviewPhase.COMPLETED:
+                    await message.channel.send("面接は既に完了しています。`/end_interview` で結果をご確認ください。")
+                    return
+                
+                # AI応答を生成
+                response_text = await generate_ai_response(session, message.content)
                 
                 # 会話を記録
-                session.add_exchange(message.content, response_text)
+                session.add_message(message.content, response_text)
                 
-                # 回答を送信
+                # 応答を送信
                 await message.channel.send(response_text)
+            
             except Exception as e:
-                await message.channel.send(f"⚠️ AIの応答中にエラーが発生しました。\nエラー内容: `{str(e)}`")
+                await message.channel.send(f"⚠️ エラーが発生しました。\nエラー内容: `{str(e)}`")
                 print(e)
 
     await bot.process_commands(message)
