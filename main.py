@@ -367,7 +367,7 @@ async def end_interview(interaction: discord.Interaction):
                 "合格": discord.Color.green(),
                 "要検討": discord.Color.yellow(),
                 "不合格": discord.Color.red()
-            }.get(evaluation.get("recommendation", "要検討"), discord.Color.gray())
+            }.get(evaluation.get("recommendation", "要検討"), discord.Color.blue())
             
             embed = discord.Embed(
                 title="📊 面接評価結果",
