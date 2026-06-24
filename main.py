@@ -103,11 +103,12 @@ class StartButton(discord.ui.View):
 
     @discord.ui.button(label="面接を申し込む", style=discord.ButtonStyle.green, custom_id="start_interview")
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)  # ← ここで1回だけ defer
+        await interaction.response.defer(ephemeral=True)  # ← ここでのみ defer を実行
         await start_interview_process(interaction)
 
 async def start_interview_process(interaction: discord.Interaction):
     """面接開始プロセス"""
+    # 修正箇所: ここにあった defer() は完全に削除されています
     guild = interaction.guild
     category = guild.get_channel(CATEGORY_ID) if CATEGORY_ID else None
 
@@ -362,7 +363,6 @@ async def end_interview(interaction: discord.Interaction):
                 color=discord.Color.red()
             )
         else:
-            # 修正箇所: }.get() に修正
             recommendation_color = {
                 "合格": discord.Color.green(),
                 "要検討": discord.Color.yellow(),
