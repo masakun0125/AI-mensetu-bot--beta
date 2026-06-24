@@ -130,7 +130,7 @@ async def start_interview_process(interaction: discord.Interaction):
     embed = discord.Embed(title="モデレーター募集面接へようこそ", color=discord.Color.blue())
     embed.add_field(
         name="面接内容",
-        value="以下の4つの質問にお答えいただきます：\n1. 業務可能な時間帯\n2. 志望動機\n3. 自己PR\n4. 荒らし対応方法",
+        value="以下の4つの質問にお答えいただきます：\n1. 業務可能な時間帯\n2. 志望動機\n3. 自己PR\n4. 荒らし対応方法\n※何問か追加の質問をされる場合があります。\n※面接は必ずご本人が回答してください。/n※AIなどの補助ツールを使用した場合、今後の応募をお断りする場合があります。",
         inline=False
     )
     await interview_channel.send(embed=embed)
@@ -265,6 +265,7 @@ async def generate_evaluation(session: InterviewSession) -> dict:
 
 あなたは非常に厳しい採用基準を持つ面接官です。
 モデレーターは重要な役職であり、曖昧・短すぎる回答や熱意が感じられない応募者は不合格にしてください。
+恐らく合計で応募してくる人数は3人から5人を予定しているので、厳格すぎて一人も合格者がでないという状況は避けたいです。そのため、明らかに熱意がない人は不合格、熱意はあるが微妙な人は要検討などにするのが良いと思います。
 
 【採点基準】
 - 回答が1〜2文程度の短いもの → 各項目 3点以下
@@ -338,7 +339,7 @@ class ResultView(discord.ui.View):
         
         try:
             embed = discord.Embed(
-                title="📋 面接結果のお知らせ",
+                title="**<<面接結果のお知らせ>>**",
                 description=message,
                 color=color
             )
@@ -357,7 +358,7 @@ class ResultView(discord.ui.View):
         await self.send_dm(
             interaction, "合格",
             discord.Color.green(),
-            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n審査の結果、**合格**となりました。おめでとうございます！\n近日中に担当者よりご連絡いたします。"
+            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n審査の結果、__**合格**__となりました。おめでとうございます！\n近日中に担当者よりご連絡いたします。"
         )
 
     @discord.ui.button(label="❌ 不合格", style=discord.ButtonStyle.red)
@@ -365,7 +366,7 @@ class ResultView(discord.ui.View):
         await self.send_dm(
             interaction, "不合格",
             discord.Color.red(),
-            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n慎重に審査した結果、今回は**不採用**とさせていただきました。\nまたの機会にぜひご応募ください。"
+            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n慎重に審査した結果、今回は__**不採用**__とさせていただきました。\nまたの機会にぜひご応募ください。"
         )
 
     @discord.ui.button(label="🔄 保留", style=discord.ButtonStyle.grey)
@@ -373,7 +374,7 @@ class ResultView(discord.ui.View):
         await self.send_dm(
             interaction, "保留",
             discord.Color.yellow(),
-            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n現在審査中のため、結果は**保留**となっております。\n追って担当者よりご連絡いたします。"
+            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n現在審査中のため、結果は__**保留**__となっております。\n追って担当者よりご連絡いたします。"
         )
 
 # /end_interview コマンド（管理者限定化 ＆ 権限剥奪 ＆ ボタン付き送信）
