@@ -127,10 +127,10 @@ async def start_interview_process(interaction: discord.Interaction):
     session = InterviewSession(interaction.user.id, interaction.user.name)
     interview_sessions[interview_channel.id] = session
 
-    embed = discord.Embed(title="🤝 モデレーター募集面接へようこそ", color=discord.Color.blue())
+    embed = discord.Embed(title="モデレーター募集面接へようこそ", color=discord.Color.blue())
     embed.add_field(
         name="面接内容",
-        value="以下の4つの質問にお答えいただきます：\n1️⃣ 業務可能な時間帯\n2️⃣ 志望動機\n3️⃣ 自己PR\n4️⃣ 荒らし対応方法",
+        value="以下の4つの質問にお答えいただきます：\n1️. 業務可能な時間帯\n2️. 志望動機\n3️. 自己PR\n4️. 荒らし対応方法",
         inline=False
     )
     await interview_channel.send(embed=embed)
@@ -156,8 +156,8 @@ async def on_ready():
 @bot.tree.command(name="setup_panel", description="面接申し込み用パネルを設置します")
 async def setup_panel(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="🤝 面接申込窓口",
-        description="下のボタンを押して、モデレーター募集面接に申し込んでください。",
+        title="<<=面接申込窓口=>>",
+        description="下のボタンを押して、モデレーター募集面接に申し込んでください。この面接はBotが対応します。",
         color=discord.Color.green()
     )
     await interaction.response.send_message(embed=embed, view=StartButton())
@@ -252,7 +252,7 @@ async def generate_ai_response(session: InterviewSession, user_message: str) -> 
             return f"ありがとうございました。\n\n{next_q}"
         else:
             # 修正箇所: 面接完了時メッセージの更新
-            return "すべてのご質問にお答えいただき、ありがとうございました。\n結果は担当者よりDMにてお知らせします。しばらくお待ちください。"
+            return "すべてのご質問にお答えいただき、ありがとうございました。\n結果はこのbotよりDMにてお知らせします。しばらくお待ちください。また、面接の合否についてのお問い合わせは一切承っておりません。"
 
 async def generate_evaluation(session: InterviewSession) -> dict:
     """面接全体を評価（厳格化プロンプト）"""
@@ -335,7 +335,7 @@ class ResultView(discord.ui.View):
         if user:
             try:
                 embed = discord.Embed(
-                    title="📋 面接結果のお知らせ",
+                    title="面接結果のお知らせ",
                     description=message,
                     color=color
                 )
@@ -357,7 +357,7 @@ class ResultView(discord.ui.View):
         await self.send_dm(
             interaction, "合格",
             discord.Color.green(),
-            "🎉 **モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n審査の結果、**合格**となりました。おめでとうございます！\n近日中に担当者よりご連絡いたします。"
+            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n審査の結果、**合格**となりました。おめでとうございます！\n近日中に担当者よりご連絡いたします。"
         )
 
     @discord.ui.button(label="❌ 不合格", style=discord.ButtonStyle.red)
@@ -365,7 +365,7 @@ class ResultView(discord.ui.View):
         await self.send_dm(
             interaction, "不合格",
             discord.Color.red(),
-            "📋 **モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n慎重に審査した結果、今回は**見送り**とさせていただきました。\nまたの機会にぜひご応募ください。"
+            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n慎重に審査した結果、今回は**不採用**とさせていただきました。\nまたの機会にぜひご応募ください。"
         )
 
     @discord.ui.button(label="🔄 保留", style=discord.ButtonStyle.grey)
@@ -373,7 +373,7 @@ class ResultView(discord.ui.View):
         await self.send_dm(
             interaction, "保留",
             discord.Color.yellow(),
-            "📋 **モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n現在審査中のため、結果は**保留**となっております。\n追って担当者よりご連絡いたします。"
+            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n現在審査中のため、結果は**保留**となっております。\n追って担当者よりご連絡いたします。"
         )
 
 # 修正箇所: /end_interview コマンド（管理者限定化 ＆ 権限剥奪 ＆ ボタン付き送信）
@@ -399,7 +399,7 @@ async def end_interview(interaction: discord.Interaction):
     if member:
         await interaction.channel.set_permissions(member, read_messages=False, send_messages=False)
 
-    thinking_msg = await interaction.followup.send("⏳ 評価を生成中です...", ephemeral=True)
+    thinking_msg = await interaction.followup.send("評価を生成中です...", ephemeral=True)
 
     try:
         evaluation = await generate_evaluation(session)
@@ -411,7 +411,7 @@ async def end_interview(interaction: discord.Interaction):
         }.get(evaluation.get("recommendation", "要検討"), discord.Color.blue())
 
         embed = discord.Embed(
-            title="📊 面接評価結果",
+            title="面接評価結果",
             description=f"**AI推奨: {evaluation.get('recommendation', '要検討')}**",
             color=recommendation_color
         )
@@ -433,14 +433,14 @@ async def end_interview(interaction: discord.Interaction):
         await interaction.channel.send(embed=embed, view=ResultView(session, interaction.guild))
 
     except Exception as e:
-        await interaction.followup.send(f"⚠️ エラー: {str(e)}", ephemeral=True)
+        await interaction.followup.send(f"⚠️Error: {str(e)}", ephemeral=True)
         print(e)
 
 # 追加箇所: エラーハンドリング
 @end_interview.error
 async def end_interview_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, app_commands.MissingPermissions):
-        await interaction.response.send_message("❌ このコマンドは管理者のみ使用できます。", ephemeral=True)
+        await interaction.response.send_message("このコマンドは管理者のみ使用できます。", ephemeral=True)
 
 @bot.event
 async def on_message(message):
@@ -464,7 +464,7 @@ async def on_message(message):
                 await message.channel.send(response_text)
             
             except Exception as e:
-                await message.channel.send(f"⚠️ エラーが発生しました。\nエラー内容: `{str(e)}`")
+                await message.channel.send(f"⚠️Error\n内容: `{str(e)}`")
                 print(e)
 
     await bot.process_commands(message)
