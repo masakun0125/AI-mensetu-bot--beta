@@ -235,7 +235,7 @@ async def generate_ai_response(session: InterviewSession, user_message: str) -> 
         phase_info["follow_up_count"] += 1
         
         response = client.chat.completions.create(
-            model="mixtral-8x7b-32768",
+            model="llama-3.1-70b-versatile",
             messages=[
                 {"role": "user", "content": prompt}
             ],
@@ -297,7 +297,7 @@ async def generate_evaluation(session: InterviewSession) -> dict:
     
     try:
         response = client.chat.completions.create(
-            model="mixtral-8x7b-32768",
+            model="llama-3.1-70b-versatile",
             messages=[
                 {"role": "user", "content": evaluation_prompt}
             ],
