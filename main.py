@@ -2,7 +2,7 @@ import os
 import discord
 from discord import app_commands
 from discord.ext import commands
-import anthropic
+from groq import Groq
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import json
@@ -10,10 +10,10 @@ from datetime import datetime
 from enum import Enum
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 CATEGORY_ID = int(os.getenv("INTERVIEW_CATEGORY_ID", "0"))
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+client = Groq(api_key=GROQ_API_KEY)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -221,7 +221,7 @@ def get_phase_next_question(phase: InterviewPhase) -> str:
     return ""
 
 async def generate_ai_response(session: InterviewSession, user_message: str) -> str:
-    """Claude APIを使ってAI応答を生成"""
+    """Groq APIを使ってAI応答を生成"""
     
     phase = session.current_phase
     phase_info = session.phase_data[phase]
@@ -234,15 +234,16 @@ async def generate_ai_response(session: InterviewSession, user_message: str) -> 
         prompt = get_follow_up_prompt(phase, user_message)
         phase_info["follow_up_count"] += 1
         
-        response = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=150,
+        response = client.chat.completions.create(
+            model="mixtral-8x7b-32768",
             messages=[
                 {"role": "user", "content": prompt}
-            ]
+            ],
+            max_tokens=150,
+            temperature=0.7
         )
         
-        ai_response = response.content[0].text
+        ai_response = response.choices[0].message.content
         
         # "次に進む準備ができた" のようなキーワードで次フェーズに自動移行
         if any(kw in ai_response for kw in ["次に進む", "次へ", "ありがとうございました", "了承しました"]):
@@ -266,7 +267,7 @@ async def generate_evaluation(session: InterviewSession) -> dict:
     """面接全体を評価"""
     
     conversation_text = "\n".join([
-        f"【{msg['phase']}】\n面接官: （質問）\nユーザー: {msg['user']}"
+        f"【{msg['phase']}】\nユーザー: {msg['user']}"
         for msg in session.conversation_history
     ])
     
@@ -295,15 +296,16 @@ async def generate_evaluation(session: InterviewSession) -> dict:
 必ずJSON形式のみで返してください。余分なテキストは含めないでください。"""
     
     try:
-        response = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=500,
+        response = client.chat.completions.create(
+            model="mixtral-8x7b-32768",
             messages=[
                 {"role": "user", "content": evaluation_prompt}
-            ]
+            ],
+            max_tokens=500,
+            temperature=0.5
         )
         
-        response_text = response.content[0].text
+        response_text = response.choices[0].message.content
         
         # JSON抽出
         if "```json" in response_text:
@@ -344,7 +346,7 @@ async def end_interview(interaction: discord.Interaction):
         await interaction.followup.send("まだ回答がありません。面接をお続けください。")
         return
     
-    thinking_msg = await interaction.followup.send("⏳ 評価を生成中です...（20秒程度かかります）")
+    thinking_msg = await interaction.followup.send("⏳ 評価を生成中です...（10秒程度かかります）")
     
     try:
         evaluation = await generate_evaluation(session)
