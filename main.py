@@ -103,12 +103,11 @@ class StartButton(discord.ui.View):
 
     @discord.ui.button(label="面接を申し込む", style=discord.ButtonStyle.green, custom_id="start_interview")
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)  # ← ここでのみ defer を実行
+        await interaction.response.defer(ephemeral=True)
         await start_interview_process(interaction)
 
 async def start_interview_process(interaction: discord.Interaction):
     """面接開始プロセス"""
-    # 修正箇所: ここにあった defer() は完全に削除されています
     guild = interaction.guild
     category = guild.get_channel(CATEGORY_ID) if CATEGORY_ID else None
 
@@ -165,7 +164,6 @@ async def setup_panel(interaction: discord.Interaction):
 
 def get_follow_up_prompt(phase: InterviewPhase, user_answer: str) -> str:
     """フェーズに応じたフォローアップ質問を生成"""
-    
     if phase == InterviewPhase.AVAILABILITY:
         return f"""ユーザーの回答: "{user_answer}"
 
@@ -210,47 +208,36 @@ def get_follow_up_prompt(phase: InterviewPhase, user_answer: str) -> str:
 
 def get_phase_next_question(phase: InterviewPhase) -> str:
     """次のフェーズの質問を取得"""
-    
     if phase == InterviewPhase.MOTIVATION:
         return "ありがとうございます。次に、**モデレーターへの志望動機**を教えていただけますか？\nなぜこの職に応募しようと思ったのか、ご説明ください。"
-    
     elif phase == InterviewPhase.SELF_PR:
         return "ありがとうございます。次に、**あなたの自己PR**をお願いします。\nあなたの強み、得意なこと、経験などをお聞かせください。"
-    
     elif phase == InterviewPhase.TROLL_RESPONSE:
         return "ありがとうございます。最後に、**コミュニティで荒らしやルール違反を見かけた時の対応方法**を教えていただけますか？\nどのように対応すべきだと考えますか？"
-    
     elif phase == InterviewPhase.COMPLETED:
         return None
-    
     return ""
 
 async def generate_ai_response(session: InterviewSession, user_message: str) -> str:
     """Groq APIを使ってAI応答を生成"""
-    
     phase = session.current_phase
     phase_info = session.phase_data[phase]
     
-    # 回答を記録
     session.record_phase_answer(user_message)
     
-    # フォローアップ質問が残っている場合
     if phase_info["follow_up_count"] < 1:
         prompt = get_follow_up_prompt(phase, user_message)
         phase_info["follow_up_count"] += 1
         
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "user", "content": prompt}],
             max_tokens=150,
             temperature=0.7
         )
         
         ai_response = response.choices[0].message.content
         
-        # "次に進む準備ができた" のようなキーワードで次フェーズに自動移行
         if any(kw in ai_response for kw in ["次に進む", "次へ", "ありがとうございました", "了承しました"]):
             session.next_phase()
             if session.current_phase != InterviewPhase.COMPLETED:
@@ -258,28 +245,37 @@ async def generate_ai_response(session: InterviewSession, user_message: str) -> 
                 return f"{ai_response}\n\n{next_q}"
         
         return ai_response
-    
     else:
-        # フォローアップ終了→次フェーズへ
         session.next_phase()
         if session.current_phase != InterviewPhase.COMPLETED:
             next_q = get_phase_next_question(session.current_phase)
             return f"ありがとうございました。\n\n{next_q}"
         else:
-            return "すべてのご質問に回答いただき、ありがとうございました。\n`/end_interview` コマンドで面接を終了し、評価結果をご確認ください。"
+            # 修正箇所: 面接完了時メッセージの更新
+            return "すべてのご質問にお答えいただき、ありがとうございました。\n結果は担当者よりDMにてお知らせします。しばらくお待ちください。"
 
 async def generate_evaluation(session: InterviewSession) -> dict:
-    """面接全体を評価"""
-    
+    """面接全体を評価（厳格化プロンプト）"""
     conversation_text = "\n".join([
         f"【{msg['phase']}】\nユーザー: {msg['user']}"
         for msg in session.conversation_history
     ])
     
+    # 修正箇所: 厳格な評価プロンプトへの差し替え
     evaluation_prompt = f"""
-【採用面接官の総合評価】
+【厳格な採用面接官による総合評価】
 
-以下の面接記録をもとに、モデレーター職の候補者を総合評価してください。
+あなたは非常に厳しい採用基準を持つ面接官です。
+モデレーターは重要な役職であり、曖昧・短すぎる回答や熱意が感じられない応募者は不合格にしてください。
+
+【採点基準】
+- 回答が1〜2文程度の短いもの → 各項目 3点以下
+- 具体性・根拠がない回答 → 各項目 4点以下
+- 熱意・コミュニティへの貢献意欲が感じられない → motivation 3点以下
+- 荒らし対応が「優しく対応」など曖昧なもの → judgment 3点以下
+- 合計24点未満 → 不合格
+- 合計25〜31点 → 要検討
+- 合計32点以上 → 合格
 
 【面接者】
 {session.user_name}
@@ -287,32 +283,27 @@ async def generate_evaluation(session: InterviewSession) -> dict:
 【面接の回答】
 {conversation_text}
 
-【評価項目（JSON形式で必ず返してください）】
+【評価（JSON形式のみで返してください）】
 {{
-  "availability": {{"score": 0-10, "comment": "業務対応可能性"}},
-  "motivation": {{"score": 0-10, "comment": "志望度・モチベーション"}},
-  "personality": {{"score": 0-10, "comment": "人格・適性"}},
-  "judgment": {{"score": 0-10, "comment": "判断力・対応力"}},
+  "availability": {{"score": 0-10, "comment": "コメント"}},
+  "motivation": {{"score": 0-10, "comment": "コメント"}},
+  "personality": {{"score": 0-10, "comment": "コメント"}},
+  "judgment": {{"score": 0-10, "comment": "コメント"}},
   "overall_score": 0-40,
   "recommendation": "合格 / 要検討 / 不合格",
   "summary": "総合コメント（150字以内）"
 }}
-
-必ずJSON形式のみで返してください。余分なテキストは含めないでください。"""
-    
+"""
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "user", "content": evaluation_prompt}
-            ],
+            messages=[{"role": "user", "content": evaluation_prompt}],
             max_tokens=500,
             temperature=0.5
         )
         
         response_text = response.choices[0].message.content
         
-        # JSON抽出
         if "```json" in response_text:
             json_str = response_text.split("```json")[1].split("```")[0]
         elif "{" in response_text:
@@ -322,9 +313,7 @@ async def generate_evaluation(session: InterviewSession) -> dict:
         else:
             json_str = response_text
         
-        evaluation = json.loads(json_str)
-        return evaluation
-    
+        return json.loads(json_str)
     except Exception as e:
         print(f"Evaluation error: {e}")
         return {
@@ -334,84 +323,124 @@ async def generate_evaluation(session: InterviewSession) -> dict:
             "raw_response": str(e)
         }
 
-@bot.tree.command(name="end_interview", description="面接を終了し、評価結果を表示します")
+# 追加箇所: 合否通知ボタンビュー
+class ResultView(discord.ui.View):
+    def __init__(self, session: InterviewSession, guild: discord.Guild):
+        super().__init__(timeout=None)
+        self.session = session
+        self.guild = guild
+
+    async def send_dm(self, interaction: discord.Interaction, result: str, color: discord.Color, message: str):
+        user = self.guild.get_member(self.session.user_id)
+        if user:
+            try:
+                embed = discord.Embed(
+                    title="📋 面接結果のお知らせ",
+                    description=message,
+                    color=color
+                )
+                embed.set_footer(text=f"{self.guild.name} モデレーター採用面接")
+                await user.send(embed=embed)
+                await interaction.response.send_message(f"✅ {user.name} にDMで{result}を通知しました。", ephemeral=True)
+            except discord.Forbidden:
+                await interaction.response.send_message("⚠️ ユーザーのDMが無効のため通知できませんでした。", ephemeral=True)
+        else:
+            await interaction.response.send_message("⚠️ ユーザーが見つかりませんでした。", ephemeral=True)
+        
+        # ボタンを無効化
+        for child in self.children:
+            child.disabled = True
+        await interaction.message.edit(view=self)
+
+    @discord.ui.button(label="✅ 合格", style=discord.ButtonStyle.green)
+    async def pass_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.send_dm(
+            interaction, "合格",
+            discord.Color.green(),
+            "🎉 **モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n審査の結果、**合格**となりました。おめでとうございます！\n近日中に担当者よりご連絡いたします。"
+        )
+
+    @discord.ui.button(label="❌ 不合格", style=discord.ButtonStyle.red)
+    async def fail_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.send_dm(
+            interaction, "不合格",
+            discord.Color.red(),
+            "📋 **モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n慎重に審査した結果、今回は**見送り**とさせていただきました。\nまたの機会にぜひご応募ください。"
+        )
+
+    @discord.ui.button(label="🔄 保留", style=discord.ButtonStyle.grey)
+    async def pending_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.send_dm(
+            interaction, "保留",
+            discord.Color.yellow(),
+            "📋 **モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n現在審査中のため、結果は**保留**となっております。\n追って担当者よりご連絡いたします。"
+        )
+
+# 修正箇所: /end_interview コマンド（管理者限定化 ＆ 権限剥奪 ＆ ボタン付き送信）
+@bot.tree.command(name="end_interview", description="面接を終了し、評価結果を表示します（管理者専用）")
+@app_commands.checks.has_permissions(administrator=True)
 async def end_interview(interaction: discord.Interaction):
-    """面接終了コマンド"""
     channel_id = interaction.channel_id
-    
+
     if channel_id not in interview_sessions:
         await interaction.response.send_message("このチャンネルは面接チャンネルではありません。", ephemeral=True)
         return
-    
-    await interaction.response.defer()
-    
+
+    await interaction.response.defer(ephemeral=True)
+
     session = interview_sessions[channel_id]
-    
+
     if len(session.conversation_history) == 0:
-        await interaction.followup.send("まだ回答がありません。面接をお続けください。")
+        await interaction.followup.send("まだ回答がありません。", ephemeral=True)
         return
-    
-    thinking_msg = await interaction.followup.send("⏳ 評価を生成中です...（10秒程度かかります）")
-    
+
+    # ユーザーの閲覧権限を剥奪
+    member = interaction.guild.get_member(session.user_id)
+    if member:
+        await interaction.channel.set_permissions(member, read_messages=False, send_messages=False)
+
+    thinking_msg = await interaction.followup.send("⏳ 評価を生成中です...", ephemeral=True)
+
     try:
         evaluation = await generate_evaluation(session)
-        
-        if "raw_response" in evaluation:
-            embed = discord.Embed(
-                title="⚠️ 評価生成エラー",
-                description=evaluation["summary"],
-                color=discord.Color.red()
-            )
-        else:
-            recommendation_color = {
-                "合格": discord.Color.green(),
-                "要検討": discord.Color.yellow(),
-                "不合格": discord.Color.red()
-            }.get(evaluation.get("recommendation", "要検討"), discord.Color.blue())
-            
-            embed = discord.Embed(
-                title="📊 面接評価結果",
-                description=f"**推奨: {evaluation.get('recommendation', '要検討')}**",
-                color=recommendation_color
-            )
-            
-            embed.add_field(name="総合スコア", value=f"{evaluation.get('overall_score', 0)}/40", inline=False)
-            
-            if "availability" in evaluation:
+
+        recommendation_color = {
+            "合格": discord.Color.green(),
+            "要検討": discord.Color.yellow(),
+            "不合格": discord.Color.red()
+        }.get(evaluation.get("recommendation", "要検討"), discord.Color.blue())
+
+        embed = discord.Embed(
+            title="📊 面接評価結果",
+            description=f"**AI推奨: {evaluation.get('recommendation', '要検討')}**",
+            color=recommendation_color
+        )
+        embed.add_field(name="総合スコア", value=f"{evaluation.get('overall_score', 0)}/40", inline=False)
+
+        for key, label in [("availability", "業務対応可能性"), ("motivation", "志望度"), ("personality", "人格・適性"), ("judgment", "判断力・対応力")]:
+            if key in evaluation:
                 embed.add_field(
-                    name="業務対応可能性",
-                    value=f"**{evaluation['availability'].get('score', 0)}/10** - {evaluation['availability'].get('comment', '')}",
+                    name=label,
+                    value=f"**{evaluation[key].get('score', 0)}/10** - {evaluation[key].get('comment', '')}",
                     inline=False
                 )
-            if "motivation" in evaluation:
-                embed.add_field(
-                    name="志望度・モチベーション",
-                    value=f"**{evaluation['motivation'].get('score', 0)}/10** - {evaluation['motivation'].get('comment', '')}",
-                    inline=False
-                )
-            if "personality" in evaluation:
-                embed.add_field(
-                    name="人格・適性",
-                    value=f"**{evaluation['personality'].get('score', 0)}/10** - {evaluation['personality'].get('comment', '')}",
-                    inline=False
-                )
-            if "judgment" in evaluation:
-                embed.add_field(
-                    name="判断力・対応力",
-                    value=f"**{evaluation['judgment'].get('score', 0)}/10** - {evaluation['judgment'].get('comment', '')}",
-                    inline=False
-                )
-            
-            embed.add_field(name="総評", value=evaluation.get("summary", ""), inline=False)
-            embed.set_footer(text=f"面接者: {session.user_name}")
-        
+
+        embed.add_field(name="総評", value=evaluation.get("summary", ""), inline=False)
+        embed.set_footer(text=f"面接者: {session.user_name}")
+
+        # エフェメラルな考え中メッセージを削除し、チャンネルに結果とボタンを送信
         await thinking_msg.delete()
-        await interaction.followup.send(embed=embed)
-    
+        await interaction.channel.send(embed=embed, view=ResultView(session, interaction.guild))
+
     except Exception as e:
-        await thinking_msg.delete()
-        await interaction.followup.send(f"⚠️ 評価生成中にエラーが発生しました: {str(e)}")
+        await interaction.followup.send(f"⚠️ エラー: {str(e)}", ephemeral=True)
         print(e)
+
+# 追加箇所: エラーハンドリング
+@end_interview.error
+async def end_interview_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("❌ このコマンドは管理者のみ使用できます。", ephemeral=True)
 
 @bot.event
 async def on_message(message):
@@ -427,16 +456,11 @@ async def on_message(message):
                 session = interview_sessions[message.channel.id]
                 
                 if session.current_phase == InterviewPhase.COMPLETED:
-                    await message.channel.send("面接は既に完了しています。`/end_interview` で結果をご確認ください。")
+                    await message.channel.send("面接は既に完了しています。管理者が確認するまでお待ちください。")
                     return
                 
-                # AI応答を生成
                 response_text = await generate_ai_response(session, message.content)
-                
-                # 会話を記録
                 session.add_message(message.content, response_text)
-                
-                # 応答を送信
                 await message.channel.send(response_text)
             
             except Exception as e:
