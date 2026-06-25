@@ -130,7 +130,7 @@ async def start_interview_process(interaction: discord.Interaction):
     embed = discord.Embed(title="モデレーター募集面接へようこそ", color=discord.Color.blue())
     embed.add_field(
         name="面接内容",
-        value="以下の4つの質問にお答えいただきます：\n1. 業務可能な時間帯\n2. 志望動機\n3. 自己PR\n4. 荒らし対応方法\n※何問か追加の質問をされる場合があります。\n※面接は必ずご本人が回答してください。/n※AIなどの補助ツールを使用した場合、今後の応募をお断りする場合があります。",
+        value="以下の4つの質問にお答えいただきます：\n1. 業務可能な時間帯\n2. 志望動機\n3. 自己PR\n4. 荒らし対応方法\n※何問か追加の質問をされる場合があります。\n※面接は必ずご本人が回答してください。\n※AIなどの補助ツールを使用した場合、今後の応募をお断りする場合があります。",
         inline=False
     )
     await interview_channel.send(embed=embed)
@@ -329,10 +329,9 @@ class ResultView(discord.ui.View):
         self.session = session
         self.guild = guild
 
-    # 修正箇所: send_dmメソッドの刷新
     async def send_dm(self, interaction: discord.Interaction, result: str, color: discord.Color, message: str):
         try:
-            user = await interaction.guild.fetch_member(self.session.user_id)  # ← get_member → fetch_member に変更
+            user = await interaction.guild.fetch_member(self.session.user_id)
         except discord.NotFound:
             await interaction.response.send_message("⚠️ ユーザーがサーバーから退出しているため通知できませんでした。", ephemeral=True)
             return
@@ -358,7 +357,7 @@ class ResultView(discord.ui.View):
         await self.send_dm(
             interaction, "合格",
             discord.Color.green(),
-            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n審査の結果、__**合格**__となりました。おめでとうございます！\n近日中に担当者よりご連絡いたします。"
+            **"モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n審査の結果、__**合格**__となりました。おめでとうございます！\n近日中に担当者よりご連絡いたします。"
         )
 
     @discord.ui.button(label="❌ 不合格", style=discord.ButtonStyle.red)
@@ -366,7 +365,7 @@ class ResultView(discord.ui.View):
         await self.send_dm(
             interaction, "不合格",
             discord.Color.red(),
-            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n慎重に審査した結果、今回は__**不採用**__とさせていただきました。\nまたの機会にぜひご応募ください。"
+            **"モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n慎重に審査した結果、今回は__**不採用**__とさせていただきました。\nまたの機会にぜひご応募ください。"
         )
 
     @discord.ui.button(label="🔄 保留", style=discord.ButtonStyle.grey)
@@ -374,7 +373,7 @@ class ResultView(discord.ui.View):
         await self.send_dm(
             interaction, "保留",
             discord.Color.yellow(),
-            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n現在審査中のため、結果は__**保留**__となっております。\n追って担当者よりご連絡いたします。"
+            **"モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n現在審査中のため、結果は__**保留**__となっております。\n追って担当者よりご連絡いたします。"
         )
 
 # /end_interview コマンド（管理者限定化 ＆ 権限剥奪 ＆ ボタン付き送信）
@@ -437,11 +436,58 @@ async def end_interview(interaction: discord.Interaction):
         await interaction.followup.send(f"⚠️Error: {str(e)}", ephemeral=True)
         print(e)
 
-# エラーハンドリング
+# /end_interview コマンドのエラーハンドリング
 @end_interview.error
 async def end_interview_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("このコマンドは管理者のみ使用できます。", ephemeral=True)
+
+# /an コマンド（管理者限定 ＆ 別チャンネルへの送信 ＆ 改行対応）
+@bot.tree.command(name="an", description="指定したチャンネルにメッセージを送信します（管理者専用）")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    channel="送信先のチャンネルを選択してください",
+    content="送信する内容（\\n で改行できます）"
+)
+async def an_command(
+    interaction: discord.Interaction, 
+    channel: discord.TextChannel, 
+    content: str
+):
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        # \n を実際の改行文字に置換
+        formatted_content = content.replace("\\n", "\n")
+        
+        # ボット自身の送信権限などをチェック
+        permissions = channel.permissions_for(interaction.guild.me)
+        if not permissions.send_messages:
+            await interaction.followup.send(
+                f"⚠️ {channel.mention} へのメッセージ送信権限がボットにありません。", 
+                ephemeral=True
+            )
+            return
+
+        # メッセージの送信
+        await channel.send(formatted_content)
+        await interaction.followup.send(
+            f"✅ {channel.mention} にメッセージを送信しました。", 
+            ephemeral=True
+        )
+
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ 送信エラー: {str(e)}", ephemeral=True)
+        print(e)
+
+# /an コマンドのエラーハンドリング
+@an_command.error
+async def an_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        if interaction.response.is_done():
+            await interaction.followup.send("このコマンドは管理者のみ使用できます。", ephemeral=True)
+        else:
+            await interaction.response.send_message("このコマンドは管理者のみ使用できます。", ephemeral=True)
 
 @bot.event
 async def on_message(message):
