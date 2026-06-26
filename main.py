@@ -178,7 +178,7 @@ def get_follow_up_prompt(phase: InterviewPhase, user_answer: str) -> str:
         return f"""ユーザーの回答: "{user_answer}"
 
 ユーザーの志望動機について、以下のいずれかのフォローアップ質問を1つだけ選んで、簡潔に質問してください：
-- なぜモデレーターという役割に興味を持ったのですか?
+- なぜモデレーターという役割に興味を持ったのであるか?
 - 過去に何か類似した経験やコミュニティ活動はありますか?
 - または、回答が十分に詳しい場合は、その旨を伝えて次に進む準備ができたと述べてください。
 
@@ -357,7 +357,7 @@ class ResultView(discord.ui.View):
         await self.send_dm(
             interaction, "合格",
             discord.Color.green(),
-            **"モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n審査の結果、__**合格**__となりました。おめでとうございます！\n近日中に担当者よりご連絡いたします。"
+            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n審査の結果、__**合格**__となりました。おめでとうございます！\n近日中に担当者よりご連絡いたします。"
         )
 
     @discord.ui.button(label="❌ 不合格", style=discord.ButtonStyle.red)
@@ -365,7 +365,7 @@ class ResultView(discord.ui.View):
         await self.send_dm(
             interaction, "不合格",
             discord.Color.red(),
-            **"モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n慎重に審査した結果、今回は__**不採用**__とさせていただきました。\nまたの機会にぜひご応募ください。"
+            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n慎重に審査した結果、今回は__**不採用**__とさせていただきました。\nまたの機会にぜひご応募ください。"
         )
 
     @discord.ui.button(label="🔄 保留", style=discord.ButtonStyle.grey)
@@ -373,7 +373,7 @@ class ResultView(discord.ui.View):
         await self.send_dm(
             interaction, "保留",
             discord.Color.yellow(),
-            **"モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n現在審査中のため、結果は__**保留**__となっております。\n追って担当者よりご連絡いたします。"
+            "**モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n現在審査中のため、結果は__**保留**__となっております。\n追って担当者よりご連絡いたします。"
         )
 
 # /end_interview コマンド（管理者限定化 ＆ 権限剥奪 ＆ ボタン付き送信）
@@ -488,6 +488,55 @@ async def an_command_error(interaction: discord.Interaction, error: app_commands
             await interaction.followup.send("このコマンドは管理者のみ使用できます。", ephemeral=True)
         else:
             await interaction.response.send_message("このコマンドは管理者のみ使用できます。", ephemeral=True)
+
+# 新規追加: /result コマンド（管理者限定・DM結果手動通知機能）
+@bot.tree.command(name="result", description="指定したユーザーに面接結果のDMを送信します（管理者専用）")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.choices(status=[
+    app_commands.Choice(name="✅ 合格", value="合格"),
+    app_commands.Choice(name="❌ 不採用", value="不採用"),
+    app_commands.Choice(name="🔄 保留", value="保留")
+])
+@app_commands.describe(
+    status="面接結果を選択してください",
+    user="結果を送信するユーザーを選択してください"
+)
+async def result_command(interaction: discord.Interaction, status: str, user: discord.Member):
+    await interaction.response.defer(ephemeral=True)
+    
+    current_date = datetime.now().strftime("%Y/%m/%d")
+    
+    if status == "合格":
+        color = discord.Color.green()
+        message = "モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n審査の結果、__**合格**__となりました。おめでとうございます！\n近日中に担当者よりご連絡いたします。"
+    elif status == "不採用":
+        color = discord.Color.red()
+        message = "モデレーター採用面接の結果をお知らせします。**\n\nこの度は面接にご参加いただきありがとうございました。\n慎重に審査した結果、今回は__**不採用**__とさせていただきました。\nまたの機会にぜひご応募ください。"
+    else:  # 保留
+        color = discord.Color.yellow()
+        message = "**モデレーター採用面接の結果をお知らせします。この度は面接にご参加いただきありがとうございました。\n現在審査中のため、結果は__**保留**__となっております。\n追って担当者よりご連絡いたします。"
+
+    try:
+        embed = discord.Embed(
+            title="**<<面接結果のお知らせ>>**",
+            description=message,
+            color=color
+        )
+        embed.set_footer(text=f"{interaction.guild.name} モデレーター採用面接 | 送信日: {current_date}")
+        
+        await user.send(embed=embed)
+        await interaction.followup.send(f"✅ {user.mention} にDMで「{status}」を通知しました。", ephemeral=True)
+        
+    except discord.Forbidden:
+        await interaction.followup.send(f"⚠️ {user.mention} のDMが無効化されている、またはブロックされているため、メッセージを送信できませんでした。", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ エラーが発生しました: {str(e)}", ephemeral=True)
+
+# /result コマンドのエラーハンドリング
+@result_command.error
+async def result_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("このコマンドは管理者のみ使用できます。", ephemeral=True)
 
 @bot.event
 async def on_message(message):
